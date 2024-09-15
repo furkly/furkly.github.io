@@ -1,6 +1,6 @@
 // Worker thread script
 
-importScripts('ffmpeg/ffmpeg.min.js');
+importScripts('https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.1/dist/ffmpeg.min.js');
 
 const { createFFmpeg, fetchFile } = FFmpeg;
 const ffmpeg = createFFmpeg({
