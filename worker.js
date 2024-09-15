@@ -1,9 +1,12 @@
 // Worker thread script
 
-importScripts('https://unpkg.com/@ffmpeg/ffmpeg@0.11.1/dist/ffmpeg.min.js');
+importScripts('ffmpeg/ffmpeg.min.js');
 
 const { createFFmpeg, fetchFile } = FFmpeg;
-const ffmpeg = createFFmpeg({ log: true });
+const ffmpeg = createFFmpeg({
+    log: true,
+    corePath: 'ffmpeg/ffmpeg-core/ffmpeg-core.js',
+});
 let isCanceled = false;
 let ffmpegLoaded = false;
 
@@ -72,55 +75,7 @@ self.onmessage = async (event) => {
     } else if (message.type === 'cancel') {
         isCanceled = true;
     } else if (message.type === 'performanceTest') {
-        ffmpegLoaded = message.ffmpegLoaded;
-        const cpuCores = message.deviceCapabilities.cpuCores;
-
-        try {
-            // Load FFmpeg if not already loaded
-            if (!ffmpegLoaded) {
-                await ffmpeg.load();
-                self.postMessage({ type: 'loaded' });
-                ffmpegLoaded = true;
-            }
-
-            // Start performance test
-            const startTime = performance.now();
-
-            // Adjust the number of threads based on CPU cores
-            const threadCount = Math.min(cpuCores, 8);
-
-            // Run a simple command to test performance
-            await ffmpeg.run(
-                '-f',
-                'lavfi',
-                '-i',
-                'nullsrc=s=1280x720',
-                '-t',
-                '1',
-                '-c:v',
-                'libx265',
-                '-x265-params',
-                'lossless=1',
-                '-threads',
-                threadCount.toString(),
-                'test_output.mp4'
-            );
-
-            const endTime = performance.now();
-            const timeTaken = (endTime - startTime) / 1000;
-
-            // Clean up virtual file system
-            ffmpeg.FS('unlink', 'test_output.mp4');
-
-            // Send test results back to the main thread
-            self.postMessage({ type: 'testCompleted', time: timeTaken });
-        } catch (error) {
-            self.postMessage({ type: 'error', error: getErrorMessage(error) });
-        } finally {
-            // Free up memory
-            ffmpeg.exit();
-            ffmpegLoaded = false;
-        }
+        // ... existing performance test code ...
     }
 };
 
