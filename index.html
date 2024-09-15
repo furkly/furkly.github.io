@@ -20,7 +20,7 @@
         <div id="estimation">Estimated Compression Size: N/A</div>
         <button id="compressBtn">Compress Video</button>
         <button id="cancelBtn" style="display: none;">Cancel</button>
-        <button id="performanceTestBtn">Run Performance Test</button>
+        <button id="performanceTestBtn" style="display: none;">Run Performance Test</button>
         <div id="statusMessage"></div>
         <div class="progress-bar">
             <div class="progress" id="progress"></div>
@@ -28,7 +28,7 @@
     </div>
 
     <!-- Include FFmpeg.wasm -->
-    <script src="ffmpeg/ffmpeg.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.1/dist/ffmpeg.min.js"></script>
     <!-- Main JavaScript -->
     <script src="script.js"></script>
 </body>

@@ -1,8 +1,14 @@
 // Main thread script
 
+const { createFFmpeg, fetchFile } = FFmpeg;
+const ffmpeg = createFFmpeg({
+    log: true,
+    corePath: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.11.1/dist/ffmpeg-core.js',
+});
+
 let videoFile = null;
-let worker = null;
 let ffmpegLoaded = false;
+let isCanceled = false;
 
 // Readiness check
 document.addEventListener('DOMContentLoaded', () => {
@@ -18,93 +24,102 @@ document.getElementById('videoInput').addEventListener('change', (event) => {
 });
 
 // Handle compression
-document.getElementById('compressBtn').addEventListener('click', () => {
+document.getElementById('compressBtn').addEventListener('click', async () => {
     if (!videoFile) {
         alert('Please select a video file first.');
         return;
     }
-
-    // Get device capabilities
-    const deviceCapabilities = {
-        cpuCores: navigator.hardwareConcurrency || 4, // Default to 4 cores if unavailable
-    };
 
     // Disable buttons and show cancel button
     document.getElementById('compressBtn').disabled = true;
     document.getElementById('cancelBtn').style.display = 'inline-block';
     document.getElementById('performanceTestBtn').disabled = true;
 
-    // Initialize worker
-    worker = new Worker('worker.js');
-
-    // Send video file and device capabilities to worker
-    worker.postMessage({
-        type: 'start',
-        file: videoFile,
-        ffmpegLoaded: ffmpegLoaded,
-        deviceCapabilities: deviceCapabilities,
-    });
-
     // Update status message
     updateStatus('Initializing compression...');
+
+    isCanceled = false;
 
     // Start progress simulation
     simulateProgress();
 
-    // Handle messages from worker
-    worker.onmessage = (event) => {
-        const message = event.data;
-        if (message.type === 'loaded') {
+    try {
+        // Load FFmpeg if not already loaded
+        if (!ffmpegLoaded) {
+            await ffmpeg.load();
             ffmpegLoaded = true;
             updateStatus('FFmpeg loaded. Starting compression...');
-        } else if (message.type === 'progress') {
-            // Update progress based on actual progress
-            updateActualProgress(message.progress);
-        } else if (message.type === 'completed') {
-            // Stop progress simulation
-            progress = 100;
-            updateProgress();
-
-            // Create a download link
-            const compressedVideo = URL.createObjectURL(message.blob);
-            const link = document.createElement('a');
-            link.href = compressedVideo;
-            link.download = 'compressed_video.mp4';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-
-            // Reset UI
-            resetUI();
-            updateStatus('Compression complete.');
-        } else if (message.type === 'error') {
-            // Handle error
-            resetUI();
-            updateStatus(`Error: ${message.error}`);
         }
-    };
 
-    // Handle worker errors
-    worker.onerror = (error) => {
+        if (isCanceled) return;
+
+        // Write the file to FFmpeg's virtual file system
+        ffmpeg.FS('writeFile', 'input.mp4', await fetchFile(videoFile));
+
+        if (isCanceled) return;
+
+        // Adjust the number of threads based on CPU cores
+        const cpuCores = navigator.hardwareConcurrency || 4;
+        const threadCount = Math.min(cpuCores, 8); // Limit to a max of 8 threads
+
+        // Run the compression command with adjusted parameters
+        ffmpeg.setProgress(({ ratio }) => {
+            updateActualProgress(ratio);
+        });
+
+        await ffmpeg.run(
+            '-i',
+            'input.mp4',
+            '-c:v',
+            'libx265',
+            '-x265-params',
+            'lossless=1',
+            '-threads',
+            threadCount.toString(),
+            'output.mp4'
+        );
+
+        if (isCanceled) return;
+
+        // Read the output file
+        const data = ffmpeg.FS('readFile', 'output.mp4');
+        const blob = new Blob([data.buffer], { type: 'video/mp4' });
+
+        // Clean up virtual file system
+        ffmpeg.FS('unlink', 'input.mp4');
+        ffmpeg.FS('unlink', 'output.mp4');
+
+        // Stop progress simulation
+        progress = 100;
+        updateProgress();
+
+        // Create a download link
+        const compressedVideo = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = compressedVideo;
+        link.download = 'compressed_video.mp4';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        // Reset UI
         resetUI();
-        updateStatus(`Error: ${error.message}`);
-    };
+        updateStatus('Compression complete.');
+    } catch (error) {
+        resetUI();
+        updateStatus(`Error: ${getErrorMessage(error)}`);
+    } finally {
+        // Free up memory
+        ffmpeg.exit();
+        ffmpegLoaded = false;
+    }
 });
 
 // Handle cancel
 document.getElementById('cancelBtn').addEventListener('click', () => {
-    if (worker) {
-        worker.postMessage({ type: 'cancel' });
-        worker.terminate();
-        worker = null;
-        resetUI();
-        updateStatus('Compression canceled.');
-    }
-});
-
-// Performance test
-document.getElementById('performanceTestBtn').addEventListener('click', () => {
-    runPerformanceTest();
+    isCanceled = true;
+    resetUI();
+    updateStatus('Compression canceled.');
 });
 
 // Readiness check function
@@ -140,7 +155,6 @@ function readinessCheck() {
 function disableTool() {
     document.getElementById('videoInput').disabled = true;
     document.getElementById('compressBtn').disabled = true;
-    document.getElementById('performanceTestBtn').disabled = true;
 }
 
 // Estimate compression size
@@ -196,59 +210,13 @@ function updateActualProgress(actualProgress) {
     updateProgress();
 }
 
-// Run performance test
-function runPerformanceTest() {
-    if (!ffmpegLoaded) {
-        updateStatus('Loading FFmpeg for performance test...');
+// Enhanced error messages
+function getErrorMessage(error) {
+    if (error.message.includes('Out of memory')) {
+        return 'The browser ran out of memory during compression. Try using a smaller file.';
+    } else if (error.message.includes('Invalid data')) {
+        return 'The selected file is not a valid video or is corrupted.';
     } else {
-        updateStatus('Running performance test...');
+        return error.message;
     }
-
-    // Disable buttons
-    document.getElementById('compressBtn').disabled = true;
-    document.getElementById('performanceTestBtn').disabled = true;
-
-    // Get device capabilities
-    const deviceCapabilities = {
-        cpuCores: navigator.hardwareConcurrency || 4,
-    };
-
-    // Initialize worker
-    const testWorker = new Worker('worker.js');
-
-    // Send test command to worker
-    testWorker.postMessage({
-        type: 'performanceTest',
-        ffmpegLoaded: ffmpegLoaded,
-        deviceCapabilities: deviceCapabilities,
-    });
-
-    // Handle messages from worker
-    testWorker.onmessage = (event) => {
-        const message = event.data;
-        if (message.type === 'loaded') {
-            ffmpegLoaded = true;
-            updateStatus('FFmpeg loaded. Running performance test...');
-        } else if (message.type === 'testCompleted') {
-            // Provide feedback based on test results
-            const time = message.time;
-            updateStatus(`Performance test completed. Estimated compression time: ${time.toFixed(2)} seconds.`);
-            // Re-enable buttons
-            document.getElementById('compressBtn').disabled = false;
-            document.getElementById('performanceTestBtn').disabled = false;
-            testWorker.terminate();
-        } else if (message.type === 'error') {
-            updateStatus(`Error: ${message.error}`);
-            document.getElementById('compressBtn').disabled = false;
-            document.getElementById('performanceTestBtn').disabled = false;
-            testWorker.terminate();
-        }
-    };
-
-    testWorker.onerror = (error) => {
-        updateStatus(`Error: ${error.message}`);
-        document.getElementById('compressBtn').disabled = false;
-        document.getElementById('performanceTestBtn').disabled = false;
-        testWorker.terminate();
-    };
 }
